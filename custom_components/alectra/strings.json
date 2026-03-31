@@ -1,0 +1,35 @@
+{
+  "config": {
+    "step": {
+      "pick_implementation": {
+        "title": "Pick Authentication Method"
+      },
+      "endpoints": {
+        "title": "Alectra Green Button Endpoints",
+        "description": "Enter the API endpoints provided during your CMD registration. Leave defaults if unsure.",
+        "data": {
+          "authorize_url": "Authorization URL",
+          "token_url": "Token URL",
+          "api_url": "API Base URL",
+          "scope": "Scope"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Reauthenticate with Alectra",
+        "description": "Your session has expired. Please reauthenticate."
+      }
+    },
+    "abort": {
+      "already_configured": "Account already configured.",
+      "already_in_progress": "Configuration flow already in progress.",
+      "oauth_error": "OAuth authentication error: {error}",
+      "reauth_successful": "Reauthentication successful."
+    },
+    "create_entry": {
+      "default": "Alectra Green Button connected."
+    }
+  },
+  "application_credentials": {
+    "description": "Enter the Client ID and Client Secret provided by Alectra when you registered your Green Button CMD application at the [Alectra onboarding portal]({more_info_url})."
+  }
+}

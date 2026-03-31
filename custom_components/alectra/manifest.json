@@ -1,0 +1,11 @@
+{
+  "domain": "alectra",
+  "name": "Alectra Green Button",
+  "codeowners": ["@acandido"],
+  "config_flow": true,
+  "dependencies": ["application_credentials", "webhook"],
+  "documentation": "https://github.com/acandido/ha-alectra",
+  "iot_class": "cloud_polling",
+  "requirements": ["defusedxml==0.7.1"],
+  "version": "0.1.0"
+}
