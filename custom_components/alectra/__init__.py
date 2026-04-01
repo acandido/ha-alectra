@@ -5,12 +5,14 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import voluptuous as vol
 from aiohttp import web
 
 from homeassistant.components import webhook
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers import config_entry_oauth2_flow
 
 from .api import AlectraApiClient
@@ -27,6 +29,13 @@ from .coordinator import AlectraCoordinator
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = [Platform.SENSOR]
+
+# Allow empty YAML config so async_setup is called even with config_flow: true
+# This enables the webhook to register before any config entry exists.
+CONFIG_SCHEMA = vol.Schema(
+    {DOMAIN: vol.Schema({})},
+    extra=vol.ALLOW_EXTRA,
+)
 
 
 async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
