@@ -10,8 +10,8 @@ PROD_BASE_URL = "https://alectrautilitiesgbportal.savagedata.com"
 
 # Default to sandbox during development; switch to PROD_BASE_URL for production
 DEFAULT_BASE_URL = SANDBOX_BASE_URL
-DEFAULT_AUTH_URL = f"{DEFAULT_BASE_URL}/DataCustodian/oauth/authorize"
-DEFAULT_TOKEN_URL = f"{DEFAULT_BASE_URL}/DataCustodian/oauth/token"
+DEFAULT_AUTH_URL = f"{DEFAULT_BASE_URL}/connect/authorize"
+DEFAULT_TOKEN_URL = f"{DEFAULT_BASE_URL}/connect/token"
 DEFAULT_API_URL = f"{DEFAULT_BASE_URL}/espi/1_1/resource"
 
 # Green Button scope: interval metering + usage summary with cost + retail customer
