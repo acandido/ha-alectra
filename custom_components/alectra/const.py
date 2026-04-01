@@ -2,12 +2,17 @@
 
 DOMAIN = "alectra"
 
-# Default Alectra Green Button endpoints (Savage Data Systems hosted)
-# These are configurable because exact paths are provided after CMD registration.
-DEFAULT_BASE_URL = "https://alectrautilitiesgbportal.savagedata.com"
+# Alectra Green Button endpoints (Savage Data Systems hosted)
+# Sandbox environment (used during registration/testing)
+SANDBOX_BASE_URL = "https://sandboxdc.savagedata.com:4243"
+# Production environment
+PROD_BASE_URL = "https://alectrautilitiesgbportal.savagedata.com"
+
+# Default to sandbox during development; switch to PROD_BASE_URL for production
+DEFAULT_BASE_URL = SANDBOX_BASE_URL
 DEFAULT_AUTH_URL = f"{DEFAULT_BASE_URL}/DataCustodian/oauth/authorize"
 DEFAULT_TOKEN_URL = f"{DEFAULT_BASE_URL}/DataCustodian/oauth/token"
-DEFAULT_API_URL = f"{DEFAULT_BASE_URL}/DataCustodian/espi/1_1/resource"
+DEFAULT_API_URL = f"{DEFAULT_BASE_URL}/espi/1_1/resource"
 
 # Green Button scope: interval metering + usage summary with cost + retail customer
 DEFAULT_SCOPE = "FB=4_16_51"
