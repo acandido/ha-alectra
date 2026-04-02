@@ -52,25 +52,32 @@ class GreenButtonFeed:
         self._parse_meter_readings()
         self._parse_interval_blocks()
         self._parse_usage_summaries()
+
+        # If no MeterReadings were found in the feed, create placeholders
+        # from the UsagePoint's related links so the caller knows to fetch them
+        for up in self._usage_points.values():
+            if not up.meter_readings:
+                _LOGGER.info(
+                    "UsagePoint %s has no MeterReadings in feed, "
+                    "checking related links",
+                    up.id,
+                )
+
         return list(self._usage_points.values())
 
     def _collect_entries(self) -> None:
         """Collect all Atom entries from the feed."""
-        _LOGGER.info(
+        _LOGGER.debug(
             "Root tag: %s, children: %s",
             self._root.tag,
             [child.tag for child in self._root],
         )
 
-        # Try with namespace prefix first, then without
         entries = self._root.findall("atom:entry", NS)
         if not entries:
             entries = self._root.findall(
                 "{http://www.w3.org/2005/Atom}entry"
             )
-        if not entries:
-            # Try without namespace entirely
-            entries = self._root.findall("entry")
 
         _LOGGER.info("Found %d entries in feed", len(entries))
 
@@ -78,8 +85,7 @@ class GreenButtonFeed:
             entry = EspiEntry(entry_elem)
             self._entries.append(entry)
 
-            # Log each entry's content for debugging
-            _LOGGER.info(
+            _LOGGER.debug(
                 "Entry: title=%s, self=%s, up=%s, related=%s, "
                 "content_children=%s",
                 entry.title,
@@ -92,6 +98,33 @@ class GreenButtonFeed:
             # Build parent map from up links
             if entry.up_link and entry.self_link:
                 self._parent_map[entry.self_link] = entry.up_link
+
+    def _find_parent_usage_point(self, entry_self_link: str) -> UsagePoint | None:
+        """Find the parent UsagePoint for an entry, using flexible matching.
+
+        The 'up' link might point to a collection URL (e.g., .../UsageSummary)
+        rather than the UsagePoint directly, so we also check if the entry's
+        URL contains a known UsagePoint ID.
+        """
+        # Try direct parent map lookup
+        parent_link = self._parent_map.get(entry_self_link)
+        if parent_link and parent_link in self._usage_points:
+            return self._usage_points[parent_link]
+
+        # Try matching by URL containment — if the entry URL contains
+        # a UsagePoint ID path segment, it belongs to that UsagePoint
+        for up_id, up in self._usage_points.items():
+            # Extract the UsagePoint path portion
+            if "/UsagePoint/" in up_id:
+                up_path = up_id.split("/UsagePoint/")[0] + "/UsagePoint/" + up_id.split("/UsagePoint/")[1].split("/")[0]
+                if up_path in entry_self_link:
+                    return up
+
+        # Fallback to first usage point
+        if self._usage_points:
+            return next(iter(self._usage_points.values()))
+
+        return None
 
     def _parse_reading_types(self) -> None:
         """Parse all ReadingType entries."""
@@ -133,13 +166,21 @@ class GreenButtonFeed:
             sk_elem = up_elem.find("espi:ServiceCategory/espi:kind", NS)
             if sk_elem is not None and sk_elem.text:
                 service_kind = int(sk_elem.text)
+
             up = UsagePoint(
                 id=entry.self_link or "",
                 title=entry.title or "Usage Point",
                 service_kind=service_kind,
             )
             self._usage_points[up.id] = up
-            _LOGGER.debug("Parsed UsagePoint: %s (%s)", up.id, up.title)
+
+            # Store related links for later use (fetching sub-resources)
+            up._related_links = entry.related_links
+
+            _LOGGER.info(
+                "Parsed UsagePoint: %s (%s), related links: %s",
+                up.id, up.title, entry.related_links,
+            )
 
     def _parse_meter_readings(self) -> None:
         """Parse all MeterReading entries and link to UsagePoints."""
@@ -157,13 +198,12 @@ class GreenButtonFeed:
                     mr.reading_type = self._reading_types[link]
                     break
             self._meter_readings[mr.id] = mr
+
             # Link to parent UsagePoint
-            parent_link = self._parent_map.get(mr.id)
-            if parent_link and parent_link in self._usage_points:
-                self._usage_points[parent_link].meter_readings.append(mr)
-            elif self._usage_points:
-                # Fallback: attach to first usage point
-                next(iter(self._usage_points.values())).meter_readings.append(mr)
+            parent = self._find_parent_usage_point(mr.id)
+            if parent:
+                parent.meter_readings.append(mr)
+
             _LOGGER.debug("Parsed MeterReading: %s", mr.id)
 
     def _parse_interval_blocks(self) -> None:
@@ -218,14 +258,24 @@ class GreenButtonFeed:
                 next(iter(self._meter_readings.values())).interval_blocks.append(ib)
 
     def _parse_usage_summaries(self) -> None:
-        """Parse all ElectricPowerUsageSummary entries."""
+        """Parse all UsageSummary / ElectricPowerUsageSummary entries."""
         for entry in self._entries:
             content = entry.content
             if content is None:
                 continue
-            us_elem = content.find("espi:ElectricPowerUsageSummary", NS)
+
+            # Try both UsageSummary and ElectricPowerUsageSummary
+            us_elem = content.find("espi:UsageSummary", NS)
+            if us_elem is None:
+                us_elem = content.find("espi:ElectricPowerUsageSummary", NS)
             if us_elem is None:
                 continue
+
+            _LOGGER.info(
+                "Found UsageSummary entry: %s, children: %s",
+                entry.self_link,
+                [child.tag for child in us_elem],
+            )
 
             bp = us_elem.find("espi:billingPeriod", NS)
             bp_start = 0
@@ -235,9 +285,7 @@ class GreenButtonFeed:
                 bp_duration = _int_text(bp, "espi:duration") or 0
 
             # Overall consumption
-            oc = us_elem.find(
-                "espi:overallConsumptionLastPeriod", NS
-            )
+            oc = us_elem.find("espi:overallConsumptionLastPeriod", NS)
             oc_value = None
             oc_uom = None
             oc_pot = 0
@@ -248,9 +296,7 @@ class GreenButtonFeed:
 
             # Cost
             currency_val = _int_text(us_elem, "espi:currency")
-            cost_elem = us_elem.find(
-                "espi:costAdditionalLastPeriod", NS
-            )
+            cost_elem = us_elem.find("espi:costAdditionalLastPeriod", NS)
             if cost_elem is None:
                 cost_elem = us_elem.find("espi:totalCost", NS)
             cost_value = None
@@ -270,13 +316,17 @@ class GreenButtonFeed:
                 cost_power_of_ten=cost_pot,
             )
 
-            # Link to parent UsagePoint
-            parent_link = self._parent_map.get(entry.self_link or "")
-            if parent_link and parent_link in self._usage_points:
-                self._usage_points[parent_link].usage_summaries.append(summary)
-            elif self._usage_points:
-                next(iter(self._usage_points.values())).usage_summaries.append(
-                    summary
+            _LOGGER.info(
+                "Parsed UsageSummary: bp_start=%s, consumption=%s, cost=%s",
+                bp_start, oc_value, cost_value,
+            )
+
+            # Link to parent UsagePoint using flexible matching
+            parent = self._find_parent_usage_point(entry.self_link or "")
+            if parent:
+                parent.usage_summaries.append(summary)
+                _LOGGER.info(
+                    "Linked UsageSummary to UsagePoint %s", parent.id
                 )
 
 
@@ -323,3 +373,14 @@ class EspiEntry:
     def content(self) -> Element | None:
         """The content element of this entry."""
         return self._entry.find("atom:content", NS)
+
+
+def _int_text(parent: Element, path: str) -> int | None:
+    """Get integer text from a child element."""
+    elem = parent.find(path, NS)
+    if elem is not None and elem.text:
+        try:
+            return int(elem.text)
+        except ValueError:
+            return None
+    return None

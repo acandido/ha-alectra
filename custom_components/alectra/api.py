@@ -58,6 +58,62 @@ class AlectraApiClient:
             raise last_error
         return []
 
+    async def async_fetch_meter_readings(
+        self, usage_points: list[UsagePoint]
+    ) -> None:
+        """Fetch MeterReading data for UsagePoints that have none.
+
+        The batch endpoint may only return top-level UsagePoint info with
+        related links. This follows those links to get the actual readings.
+        """
+        await self._session.async_ensure_token_valid()
+
+        for up in usage_points:
+            if up.meter_readings:
+                continue  # Already has data
+
+            # Check for related MeterReading link
+            related = getattr(up, "_related_links", [])
+            mr_links = [l for l in related if "/MeterReading" in l]
+
+            for mr_link in mr_links:
+                _LOGGER.info("Fetching MeterReading from related link: %s", mr_link)
+                try:
+                    resp = await self._session.async_request(
+                        "GET",
+                        mr_link,
+                        headers={"Accept": "application/atom+xml"},
+                    )
+                    text = await resp.text()
+                    content_type = resp.headers.get("Content-Type", "")
+
+                    _LOGGER.info(
+                        "MeterReading response: status=%s, content-type=%s, length=%d",
+                        resp.status, content_type, len(text),
+                    )
+
+                    if resp.status != 200 or "text/html" in content_type:
+                        _LOGGER.warning("Skipping non-XML MeterReading response")
+                        continue
+
+                    if text.strip():
+                        _LOGGER.debug("MeterReading XML: %s", text[:3000])
+                        sub_points = parse_xml(text)
+                        # Merge any meter readings found into this usage point
+                        for sp in sub_points:
+                            up.meter_readings.extend(sp.meter_readings)
+                        # Also check if the response had meter readings at top level
+                        if not up.meter_readings:
+                            # Try parsing as a direct MeterReading feed
+                            _LOGGER.info(
+                                "No meter readings found in sub-feed, "
+                                "will try IntervalBlock links"
+                            )
+                except Exception:
+                    _LOGGER.exception(
+                        "Error fetching MeterReading from %s", mr_link
+                    )
+
     def _build_candidate_urls(self) -> list[str]:
         """Build a list of candidate API URLs to try."""
         sub_uri = self._subscription_uri

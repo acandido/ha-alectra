@@ -37,6 +37,18 @@ class AlectraCoordinator(DataUpdateCoordinator[list[UsagePoint]]):
         """Fetch data from the Green Button API."""
         try:
             usage_points = await self.client.async_get_recent_usage(hours=48)
+
+            # If batch didn't include MeterReadings, follow related links
+            needs_fetch = any(
+                not up.meter_readings for up in usage_points
+            )
+            if needs_fetch:
+                _LOGGER.info(
+                    "Some UsagePoints have no MeterReadings, "
+                    "fetching from related links"
+                )
+                await self.client.async_fetch_meter_readings(usage_points)
+
         except AlectraApiError as err:
             raise UpdateFailed(f"Error fetching Alectra data: {err}") from err
         except Exception as err:
