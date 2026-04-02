@@ -74,6 +74,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     subscription_uri = entry.data.get(CONF_SUBSCRIPTION_URI, "")
     api_url = entry.data.get(CONF_API_URL, DEFAULT_API_URL)
 
+    _LOGGER.info("Subscription URI: %s", subscription_uri)
+    _LOGGER.info("API URL: %s", api_url)
+    _LOGGER.info("Token data keys: %s", list(entry.data.get("token", {}).keys()))
+
     if not subscription_uri:
         _LOGGER.error(
             "No subscription URI configured. "

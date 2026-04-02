@@ -70,9 +70,24 @@ class AlectraApiClient:
             )
 
         xml_text = await resp.text()
-        _LOGGER.debug("Received %d bytes of XML data", len(xml_text))
+        _LOGGER.debug("Received %d bytes of data", len(xml_text))
+        _LOGGER.debug("Response first 2000 chars: %s", xml_text[:2000])
 
-        return parse_xml(xml_text)
+        if not xml_text.strip():
+            _LOGGER.warning("Empty response from Green Button API")
+            return []
+
+        try:
+            return parse_xml(xml_text)
+        except Exception as err:
+            _LOGGER.error(
+                "Failed to parse XML response: %s\nFirst 2000 chars of response:\n%s",
+                err,
+                xml_text[:2000],
+            )
+            raise AlectraApiError(
+                f"Failed to parse API response: {err}"
+            ) from err
 
     async def async_get_recent_usage(
         self, hours: int = 48
