@@ -78,23 +78,53 @@ class AlectraApiClient:
 
             for mr_link in mr_links:
                 _LOGGER.info("Fetching MeterReading from related link: %s", mr_link)
-                try:
-                    resp = await self._session.async_request(
-                        "GET",
-                        mr_link,
-                        headers={"Accept": "application/atom+xml"},
-                    )
-                    text = await resp.text()
-                    content_type = resp.headers.get("Content-Type", "")
 
-                    _LOGGER.info(
-                        "MeterReading response: status=%s, content-type=%s, length=%d",
-                        resp.status, content_type, len(text),
-                    )
+                # Try multiple Accept headers — some servers are picky
+                accept_headers = [
+                    "application/xml",
+                    "application/atom+xml",
+                    "text/xml",
+                    "*/*",
+                ]
+                resp = None
+                text = ""
+                content_type = ""
 
-                    if resp.status != 200 or "text/html" in content_type:
-                        _LOGGER.warning("Skipping non-XML MeterReading response")
+                for accept in accept_headers:
+                    try:
+                        resp = await self._session.async_request(
+                            "GET",
+                            mr_link,
+                            headers={"Accept": accept},
+                        )
+                        text = await resp.text()
+                        content_type = resp.headers.get("Content-Type", "")
+
+                        _LOGGER.info(
+                            "MeterReading response (Accept: %s): "
+                            "status=%s, content-type=%s, length=%d",
+                            accept, resp.status, content_type, len(text),
+                        )
+
+                        if resp.status == 200:
+                            break
+                        if resp.status != 406:
+                            break
+                    except Exception:
+                        _LOGGER.exception(
+                            "Error with Accept: %s for %s", accept, mr_link
+                        )
                         continue
+
+                if resp is None or resp.status != 200 or "text/html" in content_type:
+                    _LOGGER.warning(
+                        "Could not fetch MeterReading from %s "
+                        "(status=%s, content-type=%s)",
+                        mr_link,
+                        resp.status if resp else "no response",
+                        content_type,
+                    )
+                    continue
 
                     if text.strip():
                         _LOGGER.debug("MeterReading XML: %s", text[:3000])
