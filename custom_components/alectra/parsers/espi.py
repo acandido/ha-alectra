@@ -294,16 +294,18 @@ class GreenButtonFeed:
                 oc_uom = _int_text(oc, "espi:ReadingTypeRef/espi:uom")
                 oc_pot = _int_text(oc, "espi:powerOfTenMultiplier") or 0
 
-            # Cost
+            # Cost — try billLastPeriod first (total bill), then
+            # costAdditionalLastPeriod, then totalCost
             currency_val = _int_text(us_elem, "espi:currency")
-            cost_elem = us_elem.find("espi:costAdditionalLastPeriod", NS)
-            if cost_elem is None:
-                cost_elem = us_elem.find("espi:totalCost", NS)
-            cost_value = None
+            cost_value = _int_text(us_elem, "espi:billLastPeriod")
             cost_pot = 0
-            if cost_elem is not None:
-                cost_value = _int_text(cost_elem, "espi:value")
-                cost_pot = _int_text(cost_elem, "espi:powerOfTenMultiplier") or 0
+            if cost_value is None:
+                cost_elem = us_elem.find("espi:costAdditionalLastPeriod", NS)
+                if cost_elem is None:
+                    cost_elem = us_elem.find("espi:totalCost", NS)
+                if cost_elem is not None:
+                    cost_value = _int_text(cost_elem, "espi:value")
+                    cost_pot = _int_text(cost_elem, "espi:powerOfTenMultiplier") or 0
 
             summary = UsageSummary(
                 billing_period_start=bp_start,

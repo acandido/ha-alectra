@@ -119,10 +119,11 @@ class AlectraApiClient:
                 if resp is None or resp.status != 200 or "text/html" in content_type:
                     _LOGGER.warning(
                         "Could not fetch MeterReading from %s "
-                        "(status=%s, content-type=%s)",
+                        "(status=%s, content-type=%s, body=%s)",
                         mr_link,
                         resp.status if resp else "no response",
                         content_type,
+                        text[:500] if text else "",
                     )
                     continue
 
