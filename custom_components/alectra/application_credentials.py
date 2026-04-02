@@ -63,11 +63,11 @@ class AlectraOAuth2Implementation(AuthImplementation):
 
         _LOGGER.debug(
             "Exchanging auth code at %s (using client_secret_basic)",
-            self.authorization_server.token_url,
+            self.token_url,
         )
 
         resp = await session.post(
-            self.authorization_server.token_url,
+            self.token_url,
             data=token_data,
             auth=BasicAuth(self.client_id, self.client_secret),
         )
@@ -108,7 +108,7 @@ class AlectraOAuth2Implementation(AuthImplementation):
         session = async_get_clientsession(self.hass)
 
         resp = await session.post(
-            self.authorization_server.token_url,
+            self.token_url,
             data={
                 "grant_type": "refresh_token",
                 "refresh_token": token["refresh_token"],
