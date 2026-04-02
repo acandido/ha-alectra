@@ -55,7 +55,30 @@ class AlectraCoordinator(DataUpdateCoordinator[list[UsagePoint]]):
                         total = self._calculate_total_energy(mr, up.id)
                         self._cumulative_kwh[key] = total
 
-        _LOGGER.debug(
+        # Detailed logging of parsed data structure
+        for up in usage_points:
+            _LOGGER.info(
+                "UsagePoint: id=%s, title=%s, service=%s, "
+                "meter_readings=%d, usage_summaries=%d",
+                up.id, up.title, up.service_name,
+                len(up.meter_readings), len(up.usage_summaries),
+            )
+            for mr in up.meter_readings:
+                _LOGGER.info(
+                    "  MeterReading: id=%s, reading_type=%s, "
+                    "interval_blocks=%d",
+                    mr.id,
+                    mr.reading_type.unit_name if mr.reading_type else "none",
+                    len(mr.interval_blocks),
+                )
+                total_readings = sum(
+                    len(b.readings) for b in mr.interval_blocks
+                )
+                _LOGGER.info(
+                    "    Total interval readings: %d", total_readings
+                )
+
+        _LOGGER.info(
             "Updated %d usage points with %d meter readings",
             len(usage_points),
             sum(len(up.meter_readings) for up in usage_points),

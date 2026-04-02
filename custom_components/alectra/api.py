@@ -67,15 +67,23 @@ class AlectraApiClient:
 
         # If subscription URI is a full URL, try batch and direct variants
         if sub_uri.startswith("http"):
-            # Standard Green Button: /Batch/Subscription/{id}
-            if "/Subscription/" in sub_uri:
+            # The resourceURI from the token might already be a Batch URL
+            # or a plain Subscription URL. Try both forms.
+            if "/Batch/Subscription/" in sub_uri:
+                # Already a batch URL — use as-is first, then try without Batch
+                urls.append(sub_uri)
+                urls.append(sub_uri.replace("/Batch/Subscription/", "/Subscription/"))
+            elif "/Subscription/" in sub_uri:
+                # Plain subscription URL — try batch first, then direct
                 urls.append(
                     sub_uri.replace("/Subscription/", "/Batch/Subscription/")
                 )
-            # Direct subscription URI
-            urls.append(sub_uri)
+                urls.append(sub_uri)
+            else:
+                urls.append(sub_uri)
             # UsagePoint under subscription
-            urls.append(f"{sub_uri}/UsagePoint")
+            plain_sub = sub_uri.replace("/Batch/Subscription/", "/Subscription/")
+            urls.append(f"{plain_sub}/UsagePoint")
         else:
             # subscription URI is just an ID, build full URLs
             sub_id = sub_uri.rstrip("/").split("/")[-1] if "/" in sub_uri else sub_uri
