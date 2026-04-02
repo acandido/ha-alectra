@@ -126,22 +126,20 @@ class AlectraApiClient:
                     )
                     continue
 
+                try:
                     if text.strip():
                         _LOGGER.debug("MeterReading XML: %s", text[:3000])
                         sub_points = parse_xml(text)
                         # Merge any meter readings found into this usage point
                         for sp in sub_points:
                             up.meter_readings.extend(sp.meter_readings)
-                        # Also check if the response had meter readings at top level
                         if not up.meter_readings:
-                            # Try parsing as a direct MeterReading feed
                             _LOGGER.info(
-                                "No meter readings found in sub-feed, "
-                                "will try IntervalBlock links"
+                                "No meter readings found in sub-feed"
                             )
                 except Exception:
                     _LOGGER.exception(
-                        "Error fetching MeterReading from %s", mr_link
+                        "Error parsing MeterReading from %s", mr_link
                     )
 
     def _build_candidate_urls(self) -> list[str]:
