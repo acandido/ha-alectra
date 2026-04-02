@@ -56,9 +56,39 @@ class GreenButtonFeed:
 
     def _collect_entries(self) -> None:
         """Collect all Atom entries from the feed."""
-        for entry_elem in self._root.findall("atom:entry", NS):
+        _LOGGER.info(
+            "Root tag: %s, children: %s",
+            self._root.tag,
+            [child.tag for child in self._root],
+        )
+
+        # Try with namespace prefix first, then without
+        entries = self._root.findall("atom:entry", NS)
+        if not entries:
+            entries = self._root.findall(
+                "{http://www.w3.org/2005/Atom}entry"
+            )
+        if not entries:
+            # Try without namespace entirely
+            entries = self._root.findall("entry")
+
+        _LOGGER.info("Found %d entries in feed", len(entries))
+
+        for entry_elem in entries:
             entry = EspiEntry(entry_elem)
             self._entries.append(entry)
+
+            # Log each entry's content for debugging
+            _LOGGER.info(
+                "Entry: title=%s, self=%s, up=%s, related=%s, "
+                "content_children=%s",
+                entry.title,
+                entry.self_link,
+                entry.up_link,
+                entry.related_links,
+                [child.tag for child in (entry.content or [])],
+            )
+
             # Build parent map from up links
             if entry.up_link and entry.self_link:
                 self._parent_map[entry.self_link] = entry.up_link
