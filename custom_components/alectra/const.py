@@ -6,7 +6,7 @@ DOMAIN = "alectra"
 # Sandbox environment (used during registration/testing)
 SANDBOX_BASE_URL = "https://sandboxdc.savagedata.com:4243"
 # Production environment
-PROD_BASE_URL = "https://alectrautilitiesgbportal.savagedata.com"
+PROD_BASE_URL = "https://AlectraDC.savagedata.com"
 
 DEFAULT_BASE_URL = PROD_BASE_URL
 DEFAULT_AUTH_URL = f"{DEFAULT_BASE_URL}/connect/authorize"
