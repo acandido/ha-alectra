@@ -54,6 +54,12 @@ class GreenButtonFeed:
         self._parse_interval_blocks()
         self._parse_usage_summaries()
 
+        # Sort usage summaries by billing period start, newest first
+        for up in self._usage_points.values():
+            up.usage_summaries.sort(
+                key=lambda s: s.billing_period_start, reverse=True
+            )
+
         # If no MeterReadings were found in the feed, create placeholders
         # from the UsagePoint's related links so the caller knows to fetch them
         for up in self._usage_points.values():

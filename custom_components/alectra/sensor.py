@@ -82,7 +82,7 @@ async def async_setup_entry(
                 )
 
                 # Create sensors for billing line items with amounts
-                summary = usage_point.usage_summaries[-1]
+                summary = usage_point.usage_summaries[0]
                 for item in summary.line_items:
                     if item.amount is not None:
                         entities.append(
@@ -163,7 +163,7 @@ class AlectraBillingConsumptionSensor(
         up = self._find_usage_point()
         if not up or not up.usage_summaries:
             return None
-        summary = up.usage_summaries[-1]
+        summary = up.usage_summaries[0]
         return summary.consumption_kwh
 
     @property
@@ -172,7 +172,7 @@ class AlectraBillingConsumptionSensor(
         up = self._find_usage_point()
         if not up or not up.usage_summaries:
             return None
-        summary = up.usage_summaries[-1]
+        summary = up.usage_summaries[0]
         attrs = {}
         if summary.billing_period_start:
             attrs["billing_period_start"] = datetime.fromtimestamp(
@@ -226,7 +226,7 @@ class AlectraBillingCostSensor(
         up = self._find_usage_point()
         if not up or not up.usage_summaries:
             return None
-        summary = up.usage_summaries[-1]
+        summary = up.usage_summaries[0]
         cost = summary.cost_dollars
         return round(cost, 2) if cost is not None else None
 
@@ -236,7 +236,7 @@ class AlectraBillingCostSensor(
         up = self._find_usage_point()
         if not up or not up.usage_summaries:
             return None
-        summary = up.usage_summaries[-1]
+        summary = up.usage_summaries[0]
         attrs = {}
         if summary.cost_value is not None:
             attrs["raw_value"] = summary.cost_value
@@ -296,7 +296,7 @@ class AlectraCurrentConsumptionSensor(
         up = self._find_usage_point()
         if not up or not up.usage_summaries:
             return None
-        summary = up.usage_summaries[-1]
+        summary = up.usage_summaries[0]
         return summary.current_consumption_kwh
 
     def _find_usage_point(self) -> UsagePoint | None:
@@ -342,7 +342,7 @@ class AlectraBillingLineItemSensor(
         up = self._find_usage_point()
         if not up or not up.usage_summaries:
             return None
-        summary = up.usage_summaries[-1]
+        summary = up.usage_summaries[0]
         for item in summary.line_items:
             if item.note == self._item_note and item.amount is not None:
                 return item.amount_dollars
