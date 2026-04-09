@@ -51,6 +51,7 @@ class AlectraFlowHandler(
         # Register OAuth2 implementation so it's available for the flow
         config_entry_oauth2_flow.async_register_implementation(
             self.hass,
+            DOMAIN,
             AlectraOAuth2Implementation(self.hass),
         )
         return await super().async_step_user(user_input)
