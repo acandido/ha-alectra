@@ -14,8 +14,8 @@ DEFAULT_AUTH_URL = f"{DEFAULT_BASE_URL}/connect/authorize"
 DEFAULT_TOKEN_URL = f"{DEFAULT_BASE_URL}/connect/token"
 DEFAULT_API_URL = f"{DEFAULT_BASE_URL}/espi/1_1/resource"
 
-# Green Button scope: interval metering + usage summary with cost + retail customer
-DEFAULT_SCOPE = "FB=4_16_51"
+# Green Button scope: interval metering (4) + usage summary with cost (16)
+DEFAULT_SCOPE = "FB=4_16"
 
 # Polling interval in seconds (1 hour) — fallback if push notifications aren't working
 DEFAULT_SCAN_INTERVAL = 3600
