@@ -10,6 +10,7 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.helpers import config_entry_oauth2_flow
 
+from .auth import AlectraOAuth2Implementation
 from .const import (
     CONF_API_URL,
     CONF_AUTHORIZATION_URI,
@@ -47,6 +48,11 @@ class AlectraFlowHandler(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Handle a flow initialized by the user."""
+        # Register OAuth2 implementation so it's available for the flow
+        config_entry_oauth2_flow.async_register_implementation(
+            self.hass,
+            AlectraOAuth2Implementation(self.hass),
+        )
         return await super().async_step_user(user_input)
 
     async def async_step_endpoints(
