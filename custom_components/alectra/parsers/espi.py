@@ -239,6 +239,7 @@ class GreenButtonFeed:
                 quality = _int_text(ir_elem, "espi:ReadingQuality/espi:quality")
 
                 value = _int_text(ir_elem, "espi:value") or 0
+                tou = _int_text(ir_elem, "espi:tou")
                 readings.append(
                     IntervalReading(
                         start=ir_start,
@@ -246,6 +247,7 @@ class GreenButtonFeed:
                         value=value,
                         cost=cost,
                         quality=quality,
+                        tou=tou,
                     )
                 )
 

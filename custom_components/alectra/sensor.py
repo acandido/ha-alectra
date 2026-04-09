@@ -394,13 +394,18 @@ class AlectraEnergySensor(CoordinatorEntity[AlectraCoordinator], SensorEntity):
         reading = self.coordinator.get_latest_reading(self._key)
         if not reading:
             return None
-        return {
+        attrs = {
             "last_interval_start": datetime.fromtimestamp(
                 reading.start, tz=timezone.utc
             ).isoformat(),
             "last_interval_duration_seconds": reading.duration,
             "last_interval_raw_value": reading.value,
         }
+        if reading.tou is not None:
+            tou_names = {1: "On-Peak", 2: "Mid-Peak", 3: "Off-Peak", 4: "Super Off-Peak"}
+            attrs["time_of_use"] = tou_names.get(reading.tou, f"TOU {reading.tou}")
+            attrs["tou_code"] = reading.tou
+        return attrs
 
 
 class AlectraPowerSensor(CoordinatorEntity[AlectraCoordinator], SensorEntity):

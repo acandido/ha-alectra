@@ -77,6 +77,7 @@ class IntervalReading:
     value: int  # Raw value (apply ReadingType multiplier + UoM)
     cost: int | None = None  # Raw cost value (apply cost multiplier)
     quality: int | None = None
+    tou: int | None = None  # Time-of-use period code
 
 
 @dataclass

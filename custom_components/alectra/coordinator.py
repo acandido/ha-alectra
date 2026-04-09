@@ -36,7 +36,10 @@ class AlectraCoordinator(DataUpdateCoordinator[list[UsagePoint]]):
     async def _async_update_data(self) -> list[UsagePoint]:
         """Fetch data from the Green Button API."""
         try:
-            usage_points = await self.client.async_get_recent_usage(hours=48)
+            # Fetch all available data without time filters.
+            # The Batch endpoint returns IntervalBlocks only when
+            # no published-min/published-max is specified.
+            usage_points = await self.client.async_get_usage_points()
 
             # If batch didn't include MeterReadings, follow related links
             needs_fetch = any(
@@ -76,24 +79,32 @@ class AlectraCoordinator(DataUpdateCoordinator[list[UsagePoint]]):
                 len(up.meter_readings), len(up.usage_summaries),
             )
             for mr in up.meter_readings:
-                _LOGGER.info(
-                    "  MeterReading: id=%s, reading_type=%s, "
-                    "interval_blocks=%d",
-                    mr.id,
-                    mr.reading_type.unit_name if mr.reading_type else "none",
-                    len(mr.interval_blocks),
-                )
                 total_readings = sum(
                     len(b.readings) for b in mr.interval_blocks
                 )
                 _LOGGER.info(
-                    "    Total interval readings: %d", total_readings
+                    "  MeterReading: id=%s, reading_type=%s, "
+                    "interval_blocks=%d, total_readings=%d",
+                    mr.id,
+                    mr.reading_type.unit_name if mr.reading_type else "none",
+                    len(mr.interval_blocks),
+                    total_readings,
+                )
+            for us in up.usage_summaries:
+                _LOGGER.info(
+                    "  UsageSummary: consumption=%.3f kWh, cost=$%.2f, "
+                    "current=%.3f kWh, line_items=%d",
+                    us.consumption_kwh or 0,
+                    us.cost_dollars or 0,
+                    us.current_consumption_kwh or 0,
+                    len(us.line_items),
                 )
 
         _LOGGER.info(
-            "Updated %d usage points with %d meter readings",
+            "Updated %d usage points with %d meter readings, %d usage summaries",
             len(usage_points),
             sum(len(up.meter_readings) for up in usage_points),
+            sum(len(up.usage_summaries) for up in usage_points),
         )
         return usage_points
 
