@@ -13,6 +13,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_entry_oauth2_flow
 
 from .api import AlectraApiClient
+from .auth import AlectraOAuth2Implementation
 from .const import (
     CONF_API_URL,
     CONF_SUBSCRIPTION_URI,
@@ -30,6 +31,13 @@ PLATFORMS = [Platform.SENSOR]
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Alectra Green Button from a config entry."""
     hass.data.setdefault(DOMAIN, {})
+
+    # Ensure OAuth2 implementation is registered (needed on restart)
+    config_entry_oauth2_flow.async_register_implementation(
+        hass,
+        DOMAIN,
+        AlectraOAuth2Implementation(hass),
+    )
 
     implementation = await config_entry_oauth2_flow.async_get_config_entry_implementation(
         hass, entry
