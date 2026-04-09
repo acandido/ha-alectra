@@ -15,7 +15,7 @@ DEFAULT_API_URL = f"{DEFAULT_BASE_URL}/espi/1_1/resource"
 
 # OAuth2 client credentials (shared across all users of this integration)
 CLIENT_ID = "24b323ba-bf67-43dd-9aa9-7014145cd161"
-CLIENT_SECRET = "WZYGELhieelxDIZFZodcSP270v043szr"
+CLIENT_SECRET = "o1h2e39cAg4xAxgC4BpFJ1O0982n2Cas"
 
 # Green Button scope: interval metering (4) + usage summary with cost (16)
 DEFAULT_SCOPE = "FB=4_16"
