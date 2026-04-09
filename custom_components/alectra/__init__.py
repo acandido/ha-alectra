@@ -12,10 +12,10 @@ from homeassistant.components import webhook
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
-import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers import config_entry_oauth2_flow
 
 from .api import AlectraApiClient
+from .auth import AlectraOAuth2Implementation
 from .const import (
     CONF_API_URL,
     CONF_SUBSCRIPTION_URI,
@@ -45,6 +45,12 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
     Alectra CMD registration testing, even before OAuth is configured.
     """
     hass.data.setdefault(DOMAIN, {})
+
+    # Register OAuth2 implementation with hardcoded credentials
+    config_entry_oauth2_flow.async_register_implementation(
+        hass,
+        AlectraOAuth2Implementation(hass),
+    )
 
     # Register webhook right away so Alectra/Savage Data can reach it
     # during the third-party application registration and testing phase.

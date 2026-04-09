@@ -28,8 +28,5 @@
     "create_entry": {
       "default": "Alectra Green Button connected."
     }
-  },
-  "application_credentials": {
-    "description": "Enter the Client ID and Client Secret provided by Alectra when you registered your Green Button CMD application at the [Alectra onboarding portal]({more_info_url})."
   }
 }

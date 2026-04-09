@@ -1,4 +1,8 @@
-"""Application credentials for Alectra Green Button."""
+"""OAuth2 implementation for Alectra Green Button.
+
+Uses client_secret_basic (HTTP Basic Auth) as required by Savage Data's
+OIDC server, with hardcoded client credentials shared across all users.
+"""
 
 from __future__ import annotations
 
@@ -7,49 +11,38 @@ from typing import Any
 
 from aiohttp import BasicAuth
 
-from homeassistant.components.application_credentials import (
-    AuthImplementation,
-    AuthorizationServer,
-    ClientCredential,
-)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.config_entry_oauth2_flow import (
+    LocalOAuth2Implementation,
+)
 
-from .const import DEFAULT_AUTH_URL, DEFAULT_TOKEN_URL
+from .const import (
+    CLIENT_ID,
+    CLIENT_SECRET,
+    DEFAULT_AUTH_URL,
+    DEFAULT_TOKEN_URL,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
-ALECTRA_ONBOARDING_URL = "https://alectrautilitiesonboarding.savagedata.com/"
 
-
-async def async_get_auth_implementation(
-    hass: HomeAssistant,
-    auth_domain: str,
-    credential: ClientCredential,
-) -> AlectraOAuth2Implementation:
-    """Return a custom auth implementation using client_secret_basic."""
-    return AlectraOAuth2Implementation(
-        hass,
-        auth_domain,
-        credential,
-        AuthorizationServer(
-            authorize_url=DEFAULT_AUTH_URL,
-            token_url=DEFAULT_TOKEN_URL,
-        ),
-    )
-
-
-async def async_get_description_placeholders(hass: HomeAssistant) -> dict[str, str]:
-    """Return description placeholders for the credentials dialog."""
-    return {"more_info_url": ALECTRA_ONBOARDING_URL}
-
-
-class AlectraOAuth2Implementation(AuthImplementation):
+class AlectraOAuth2Implementation(LocalOAuth2Implementation):
     """OAuth2 implementation using client_secret_basic (HTTP Basic Auth).
 
     Savage Data's OIDC server expects credentials via Basic Auth header
     rather than in the POST body (client_secret_post).
     """
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        super().__init__(
+            hass,
+            domain="alectra",
+            client_id=CLIENT_ID,
+            client_secret=CLIENT_SECRET,
+            authorize_url=DEFAULT_AUTH_URL,
+            token_url=DEFAULT_TOKEN_URL,
+        )
 
     async def async_resolve_external_data(self, external_data: Any) -> dict:
         """Exchange auth code for tokens using Basic Auth."""
