@@ -319,8 +319,18 @@ class GreenButtonFeed:
             )
 
             _LOGGER.info(
-                "Parsed UsageSummary: bp_start=%s, consumption=%s, cost=%s",
-                bp_start, oc_value, cost_value,
+                "Parsed UsageSummary: bp_start=%s, "
+                "consumption: value=%s uom=%s pot=%s, "
+                "cost: value=%s pot=%s currency=%s",
+                bp_start, oc_value, oc_uom, oc_pot,
+                cost_value, cost_pot, currency_val,
+            )
+
+            # Dump all direct children of UsageSummary for debugging
+            _LOGGER.info(
+                "UsageSummary raw children: %s",
+                [(child.tag, child.text, [(gc.tag, gc.text) for gc in child])
+                 for child in us_elem],
             )
 
             # Link to parent UsagePoint using flexible matching

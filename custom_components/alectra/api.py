@@ -235,7 +235,7 @@ class AlectraApiClient:
             _LOGGER.warning("Empty response from %s", url)
             return []
 
-        _LOGGER.debug("Response first 2000 chars: %s", text[:2000])
+        _LOGGER.info("Response first 3000 chars: %s", text[:3000])
 
         try:
             result = parse_xml(text)
