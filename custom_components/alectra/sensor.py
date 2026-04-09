@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import logging
+import re
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -34,7 +35,6 @@ async def async_setup_entry(
     entities: list[SensorEntity] = []
     if coordinator.data:
         for usage_point in coordinator.data:
-            # Create device for this usage point regardless of data availability
             _LOGGER.info(
                 "Creating sensors for UsagePoint: %s (%s), "
                 "meter_readings=%d, usage_summaries=%d",
@@ -66,7 +66,7 @@ async def async_setup_entry(
             # Sensors from UsageSummary data (billing period summaries)
             if usage_point.usage_summaries:
                 entities.append(
-                    AlectraBillingSensor(
+                    AlectraBillingConsumptionSensor(
                         coordinator, entry, usage_point
                     )
                 )
@@ -75,6 +75,21 @@ async def async_setup_entry(
                         coordinator, entry, usage_point
                     )
                 )
+                entities.append(
+                    AlectraCurrentConsumptionSensor(
+                        coordinator, entry, usage_point
+                    )
+                )
+
+                # Create sensors for billing line items with amounts
+                summary = usage_point.usage_summaries[-1]
+                for item in summary.line_items:
+                    if item.amount is not None:
+                        entities.append(
+                            AlectraBillingLineItemSensor(
+                                coordinator, entry, usage_point, item.note
+                            )
+                        )
 
             # Always add a status sensor per usage point
             entities.append(
@@ -87,6 +102,7 @@ async def async_setup_entry(
         )
         entities.append(AlectraStatusSensor(coordinator, entry))
 
+    _LOGGER.info("Creating %d sensors total", len(entities))
     async_add_entities(entities)
 
 
@@ -107,16 +123,25 @@ def _make_device_info(entry: ConfigEntry, usage_point: UsagePoint) -> DeviceInfo
         manufacturer="Alectra Utilities",
         model="Green Button Meter",
         entry_type=DeviceEntryType.SERVICE,
-        configuration_url="https://alectrautilitiesgbportal.savagedata.com/",
+        configuration_url="https://alectradc.savagedata.com/",
     )
 
 
-class AlectraBillingSensor(CoordinatorEntity[AlectraCoordinator], SensorEntity):
+def _slugify(text: str) -> str:
+    """Create a slug from text for use in unique IDs."""
+    slug = text.lower().strip()
+    slug = re.sub(r"[^a-z0-9]+", "_", slug)
+    return slug.strip("_")
+
+
+class AlectraBillingConsumptionSensor(
+    CoordinatorEntity[AlectraCoordinator], SensorEntity
+):
     """Sensor for billing period energy consumption from UsageSummary."""
 
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_state_class = SensorStateClass.TOTAL
-    _attr_native_unit_of_measurement = "Wh"
+    _attr_native_unit_of_measurement = "kWh"
     _attr_has_entity_name = True
     _attr_icon = "mdi:meter-electric"
 
@@ -134,16 +159,12 @@ class AlectraBillingSensor(CoordinatorEntity[AlectraCoordinator], SensorEntity):
 
     @property
     def native_value(self) -> float | None:
-        """Return the billing period consumption."""
+        """Return the billing period consumption in kWh."""
         up = self._find_usage_point()
         if not up or not up.usage_summaries:
             return None
-        # Use the most recent usage summary
         summary = up.usage_summaries[-1]
-        if summary.overall_consumption_value is not None:
-            multiplier = 10.0 ** summary.overall_consumption_power_of_ten
-            return summary.overall_consumption_value * multiplier
-        return None
+        return summary.consumption_kwh
 
     @property
     def extra_state_attributes(self) -> dict | None:
@@ -161,11 +182,13 @@ class AlectraBillingSensor(CoordinatorEntity[AlectraCoordinator], SensorEntity):
             attrs["billing_period_days"] = round(
                 summary.billing_period_duration / 86400, 1
             )
+        if summary.overall_consumption_value is not None:
+            attrs["raw_value"] = summary.overall_consumption_value
+            attrs["power_of_ten"] = summary.overall_consumption_power_of_ten
         attrs["total_summaries"] = len(up.usage_summaries)
         return attrs
 
     def _find_usage_point(self) -> UsagePoint | None:
-        """Find this sensor's usage point in coordinator data."""
         if not self.coordinator.data:
             return None
         for up in self.coordinator.data:
@@ -174,8 +197,10 @@ class AlectraBillingSensor(CoordinatorEntity[AlectraCoordinator], SensorEntity):
         return None
 
 
-class AlectraBillingCostSensor(CoordinatorEntity[AlectraCoordinator], SensorEntity):
-    """Sensor for billing period cost from UsageSummary."""
+class AlectraBillingCostSensor(
+    CoordinatorEntity[AlectraCoordinator], SensorEntity
+):
+    """Sensor for billing period total cost from UsageSummary."""
 
     _attr_device_class = SensorDeviceClass.MONETARY
     _attr_state_class = SensorStateClass.TOTAL
@@ -197,31 +222,133 @@ class AlectraBillingCostSensor(CoordinatorEntity[AlectraCoordinator], SensorEnti
 
     @property
     def native_value(self) -> float | None:
-        """Return the billing period cost."""
+        """Return the billing period cost in dollars."""
         up = self._find_usage_point()
         if not up or not up.usage_summaries:
             return None
         summary = up.usage_summaries[-1]
-        if summary.cost_value is not None:
-            multiplier = 10.0 ** summary.cost_power_of_ten
-            return round(summary.cost_value * multiplier, 2)
-        return None
+        cost = summary.cost_dollars
+        return round(cost, 2) if cost is not None else None
 
     @property
     def extra_state_attributes(self) -> dict | None:
-        """Return cost breakdown details."""
+        """Return cost details."""
         up = self._find_usage_point()
         if not up or not up.usage_summaries:
             return None
         summary = up.usage_summaries[-1]
         attrs = {}
+        if summary.cost_value is not None:
+            attrs["raw_value"] = summary.cost_value
+            attrs["power_of_ten"] = summary.cost_power_of_ten
         if summary.currency is not None:
             from .model import CURRENCY_NAMES
-            attrs["currency"] = CURRENCY_NAMES.get(summary.currency, str(summary.currency))
+            attrs["currency"] = CURRENCY_NAMES.get(
+                summary.currency, str(summary.currency)
+            )
+        if summary.billing_period_start:
+            attrs["billing_period_start"] = datetime.fromtimestamp(
+                summary.billing_period_start, tz=timezone.utc
+            ).isoformat()
+        if summary.billing_period_duration:
+            attrs["billing_period_days"] = round(
+                summary.billing_period_duration / 86400, 1
+            )
         return attrs
 
     def _find_usage_point(self) -> UsagePoint | None:
-        """Find this sensor's usage point in coordinator data."""
+        if not self.coordinator.data:
+            return None
+        for up in self.coordinator.data:
+            if up.id == self._usage_point_id:
+                return up
+        return None
+
+
+class AlectraCurrentConsumptionSensor(
+    CoordinatorEntity[AlectraCoordinator], SensorEntity
+):
+    """Sensor for current billing period consumption (updated mid-cycle)."""
+
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.TOTAL
+    _attr_native_unit_of_measurement = "kWh"
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:lightning-bolt"
+
+    def __init__(
+        self,
+        coordinator: AlectraCoordinator,
+        entry: ConfigEntry,
+        usage_point: UsagePoint,
+    ) -> None:
+        super().__init__(coordinator)
+        self._usage_point_id = usage_point.id
+        self._attr_unique_id = (
+            f"{entry.entry_id}_current_energy_{usage_point.id}"
+        )
+        self._attr_name = "Current Period Consumption"
+        self._attr_device_info = _make_device_info(entry, usage_point)
+
+    @property
+    def native_value(self) -> float | None:
+        """Return current billing period consumption in kWh."""
+        up = self._find_usage_point()
+        if not up or not up.usage_summaries:
+            return None
+        summary = up.usage_summaries[-1]
+        return summary.current_consumption_kwh
+
+    def _find_usage_point(self) -> UsagePoint | None:
+        if not self.coordinator.data:
+            return None
+        for up in self.coordinator.data:
+            if up.id == self._usage_point_id:
+                return up
+        return None
+
+
+class AlectraBillingLineItemSensor(
+    CoordinatorEntity[AlectraCoordinator], SensorEntity
+):
+    """Sensor for an individual billing line item (e.g., Delivery Charge)."""
+
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_state_class = SensorStateClass.TOTAL
+    _attr_native_unit_of_measurement = "CAD"
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:receipt-text"
+
+    def __init__(
+        self,
+        coordinator: AlectraCoordinator,
+        entry: ConfigEntry,
+        usage_point: UsagePoint,
+        item_note: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._usage_point_id = usage_point.id
+        self._item_note = item_note
+        slug = _slugify(item_note)
+        self._attr_unique_id = (
+            f"{entry.entry_id}_line_{slug}_{usage_point.id}"
+        )
+        self._attr_name = item_note
+        self._attr_device_info = _make_device_info(entry, usage_point)
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the line item amount in dollars."""
+        up = self._find_usage_point()
+        if not up or not up.usage_summaries:
+            return None
+        summary = up.usage_summaries[-1]
+        for item in summary.line_items:
+            if item.note == self._item_note and item.amount is not None:
+                return item.amount_dollars
+        return None
+
+    def _find_usage_point(self) -> UsagePoint | None:
         if not self.coordinator.data:
             return None
         for up in self.coordinator.data:
@@ -256,17 +383,14 @@ class AlectraEnergySensor(CoordinatorEntity[AlectraCoordinator], SensorEntity):
 
     @callback
     def _handle_coordinator_update(self) -> None:
-        """Handle updated data from the coordinator."""
         self.async_write_ha_state()
 
     @property
     def native_value(self) -> float | None:
-        """Return the cumulative energy in kWh."""
         return self.coordinator.get_cumulative_kwh(self._key)
 
     @property
     def extra_state_attributes(self) -> dict | None:
-        """Return additional attributes."""
         reading = self.coordinator.get_latest_reading(self._key)
         if not reading:
             return None
@@ -305,15 +429,12 @@ class AlectraPowerSensor(CoordinatorEntity[AlectraCoordinator], SensorEntity):
 
     @property
     def native_value(self) -> float | None:
-        """Calculate average power in watts from the latest interval."""
         reading = self.coordinator.get_latest_reading(self._key)
         if not reading or reading.duration == 0:
             return None
-
         rt = self._meter_reading.reading_type
         if not rt:
             return None
-
         energy_wh = reading.value * rt.multiplier
         if rt.uom == UOM_WH:
             hours = reading.duration / 3600.0
@@ -348,10 +469,8 @@ class AlectraCostSensor(CoordinatorEntity[AlectraCoordinator], SensorEntity):
 
     @property
     def native_value(self) -> float | None:
-        """Return cumulative cost in CAD."""
         if not self.coordinator.data:
             return None
-
         total_cost = 0
         found = False
         for up in self.coordinator.data:
@@ -366,7 +485,6 @@ class AlectraCostSensor(CoordinatorEntity[AlectraCoordinator], SensorEntity):
                         if reading.cost is not None:
                             total_cost += reading.cost * cost_multiplier
                             found = True
-
         return round(total_cost, 2) if found else None
 
 
@@ -384,7 +502,9 @@ class AlectraStatusSensor(CoordinatorEntity[AlectraCoordinator], SensorEntity):
     ) -> None:
         super().__init__(coordinator)
         if usage_point:
-            self._attr_unique_id = f"{entry.entry_id}_status_{usage_point.id}"
+            self._attr_unique_id = (
+                f"{entry.entry_id}_status_{usage_point.id}"
+            )
             self._attr_name = "Connection Status"
             self._attr_device_info = _make_device_info(entry, usage_point)
         else:
@@ -393,7 +513,6 @@ class AlectraStatusSensor(CoordinatorEntity[AlectraCoordinator], SensorEntity):
 
     @property
     def native_value(self) -> str:
-        """Return the connection status."""
         if self.coordinator.data:
             return "Connected"
         if self.coordinator.last_update_success is False:

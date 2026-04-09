@@ -8,6 +8,7 @@ from xml.etree.ElementTree import Element
 from defusedxml import ElementTree as dET
 
 from ..model import (
+    BillingLineItem,
     IntervalBlock,
     IntervalReading,
     MeterReading,
@@ -295,17 +296,47 @@ class GreenButtonFeed:
                 oc_pot = _int_text(oc, "espi:powerOfTenMultiplier") or 0
 
             # Cost — try billLastPeriod first (total bill), then
-            # costAdditionalLastPeriod, then totalCost
+            # costAdditionalLastPeriod, then totalCost.
+            # Savage Data stores billLastPeriod in mills (10^-3 dollars).
             currency_val = _int_text(us_elem, "espi:currency")
             cost_value = _int_text(us_elem, "espi:billLastPeriod")
-            cost_pot = 0
+            cost_pot = -3  # billLastPeriod is in mills (thousandths of dollar)
             if cost_value is None:
                 cost_elem = us_elem.find("espi:costAdditionalLastPeriod", NS)
                 if cost_elem is None:
                     cost_elem = us_elem.find("espi:totalCost", NS)
                 if cost_elem is not None:
                     cost_value = _int_text(cost_elem, "espi:value")
-                    cost_pot = _int_text(cost_elem, "espi:powerOfTenMultiplier") or 0
+                    cost_pot = _int_text(cost_elem, "espi:powerOfTenMultiplier") or -3
+
+            # Current billing period consumption
+            cc = us_elem.find("espi:currentBillingPeriodOverAllConsumption", NS)
+            cc_value = None
+            cc_pot = 0
+            if cc is not None:
+                cc_value = _int_text(cc, "espi:value")
+                cc_pot = _int_text(cc, "espi:powerOfTenMultiplier") or 0
+
+            # Parse line items from costAdditionalDetailLastPeriod
+            line_items: list[BillingLineItem] = []
+            for detail in us_elem.findall(
+                "espi:costAdditionalDetailLastPeriod", NS
+            ):
+                note_elem = detail.find("espi:note", NS)
+                note = note_elem.text if note_elem is not None and note_elem.text else ""
+                amount = _int_text(detail, "espi:amount")
+                unit_cost = _int_text(detail, "espi:unitCost")
+                item_kind = _int_text(detail, "espi:itemKind")
+                if note:  # Only add items that have a description
+                    line_items.append(BillingLineItem(
+                        note=note,
+                        amount=amount,
+                        unit_cost=unit_cost,
+                        item_kind=item_kind,
+                    ))
+
+            quality = _int_text(us_elem, "espi:qualityOfReading")
+            status_ts = _int_text(us_elem, "espi:statusTimeStamp")
 
             summary = UsageSummary(
                 billing_period_start=bp_start,
@@ -316,22 +347,32 @@ class GreenButtonFeed:
                 currency=currency_val,
                 cost_value=cost_value,
                 cost_power_of_ten=cost_pot,
+                current_consumption_value=cc_value,
+                current_consumption_power_of_ten=cc_pot,
+                quality_of_reading=quality,
+                status_timestamp=status_ts,
+                line_items=line_items,
             )
 
             _LOGGER.info(
                 "Parsed UsageSummary: bp_start=%s, "
-                "consumption: value=%s uom=%s pot=%s, "
-                "cost: value=%s pot=%s currency=%s",
+                "consumption: value=%s uom=%s pot=%s (%.3f kWh), "
+                "cost: value=%s pot=%s ($%.2f), "
+                "current_consumption: value=%s pot=%s, "
+                "line_items=%d, currency=%s",
                 bp_start, oc_value, oc_uom, oc_pot,
-                cost_value, cost_pot, currency_val,
+                summary.consumption_kwh or 0,
+                cost_value, cost_pot,
+                summary.cost_dollars or 0,
+                cc_value, cc_pot,
+                len(line_items), currency_val,
             )
-
-            # Dump all direct children of UsageSummary for debugging
-            _LOGGER.info(
-                "UsageSummary raw children: %s",
-                [(child.tag, child.text, [(gc.tag, gc.text) for gc in child])
-                 for child in us_elem],
-            )
+            for item in line_items:
+                if item.amount is not None:
+                    _LOGGER.info(
+                        "  Line item: %s = $%.2f",
+                        item.note, item.amount_dollars or 0,
+                    )
 
             # Link to parent UsagePoint using flexible matching
             parent = self._find_parent_usage_point(entry.self_link or "")
