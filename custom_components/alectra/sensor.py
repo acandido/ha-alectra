@@ -23,6 +23,14 @@ from .model import UOM_WH, MeterReading, UsagePoint
 
 _LOGGER = logging.getLogger(__name__)
 
+# TOU code to human-readable name
+TOU_NAMES = {
+    1: "On-Peak",
+    2: "Mid-Peak",
+    3: "Off-Peak",
+    4: "Super Off-Peak",
+}
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -46,22 +54,51 @@ async def async_setup_entry(
 
             # Sensors from MeterReading/IntervalBlock data (detailed intervals)
             for meter_reading in usage_point.meter_readings:
+                # Only create sensors for meter readings that have data
+                total_readings = sum(
+                    len(b.readings) for b in meter_reading.interval_blocks
+                )
+                if total_readings == 0:
+                    _LOGGER.info(
+                        "Skipping MeterReading %s — no interval readings",
+                        meter_reading.id,
+                    )
+                    continue
+
+                rt = meter_reading.reading_type
+                interval_len = rt.interval_length if rt else 0
+                label = "Hourly" if interval_len == 3600 else (
+                    "Daily" if interval_len == 86400 else ""
+                )
+
+                _LOGGER.info(
+                    "Creating interval sensors for MeterReading %s "
+                    "(%s, %d readings, interval=%ds)",
+                    meter_reading.id,
+                    label,
+                    total_readings,
+                    interval_len,
+                )
+
+                # Latest interval energy (kWh) — for HA Energy Dashboard
                 entities.append(
-                    AlectraEnergySensor(
-                        coordinator, entry, usage_point, meter_reading
+                    AlectraIntervalEnergySensor(
+                        coordinator, entry, usage_point, meter_reading, label
                     )
                 )
-                if _has_cost_data(meter_reading):
-                    entities.append(
-                        AlectraCostSensor(
-                            coordinator, entry, usage_point, meter_reading
-                        )
-                    )
+                # Average power (W) from latest interval
                 entities.append(
                     AlectraPowerSensor(
-                        coordinator, entry, usage_point, meter_reading
+                        coordinator, entry, usage_point, meter_reading, label
                     )
                 )
+                # Latest interval cost
+                if _has_cost_data(meter_reading):
+                    entities.append(
+                        AlectraIntervalCostSensor(
+                            coordinator, entry, usage_point, meter_reading, label
+                        )
+                    )
 
             # Sensors from UsageSummary data (billing period summaries)
             if usage_point.usage_summaries:
@@ -134,6 +171,222 @@ def _slugify(text: str) -> str:
     return slug.strip("_")
 
 
+# ---------------------------------------------------------------------------
+# Interval-based sensors (from MeterReading / IntervalBlock data)
+# ---------------------------------------------------------------------------
+
+
+class AlectraIntervalEnergySensor(
+    CoordinatorEntity[AlectraCoordinator], SensorEntity
+):
+    """Energy sensor from the latest interval reading.
+
+    Reports the energy consumed in the most recent interval (e.g., 1 hour).
+    Uses TOTAL state class so HA's Energy Dashboard can track it properly.
+    The value is the single interval's kWh, not a cumulative sum.
+    """
+
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.TOTAL
+    _attr_native_unit_of_measurement = "kWh"
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:lightning-bolt"
+
+    def __init__(
+        self,
+        coordinator: AlectraCoordinator,
+        entry: ConfigEntry,
+        usage_point: UsagePoint,
+        meter_reading: MeterReading,
+        label: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._usage_point_id = usage_point.id
+        self._meter_reading_id = meter_reading.id
+        self._key = f"{usage_point.id}_{meter_reading.id}"
+        self._attr_unique_id = f"{entry.entry_id}_interval_energy_{self._key}"
+        name = f"{label} Energy" if label else "Interval Energy"
+        self._attr_name = name.strip()
+        self._attr_device_info = _make_device_info(entry, usage_point)
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the latest interval's energy in kWh."""
+        reading = self.coordinator.get_latest_reading(self._key)
+        if not reading:
+            return None
+        mr = self._find_meter_reading()
+        if not mr or not mr.reading_type:
+            return None
+        rt = mr.reading_type
+        # value × 10^pot gives Wh, divide by 1000 for kWh
+        energy_wh = reading.value * rt.multiplier
+        if rt.uom == UOM_WH:
+            return round(energy_wh / 1000.0, 3)
+        return None
+
+    @property
+    def extra_state_attributes(self) -> dict | None:
+        reading = self.coordinator.get_latest_reading(self._key)
+        if not reading:
+            return None
+        attrs = {
+            "interval_start": datetime.fromtimestamp(
+                reading.start, tz=timezone.utc
+            ).isoformat(),
+            "interval_duration_seconds": reading.duration,
+            "raw_value": reading.value,
+        }
+        if reading.tou is not None:
+            attrs["time_of_use"] = TOU_NAMES.get(reading.tou, f"TOU {reading.tou}")
+            attrs["tou_code"] = reading.tou
+        # Include total readings count for context
+        mr = self._find_meter_reading()
+        if mr:
+            total = sum(len(b.readings) for b in mr.interval_blocks)
+            attrs["total_readings_available"] = total
+        return attrs
+
+    def _find_meter_reading(self) -> MeterReading | None:
+        if not self.coordinator.data:
+            return None
+        for up in self.coordinator.data:
+            if up.id == self._usage_point_id:
+                for mr in up.meter_readings:
+                    if mr.id == self._meter_reading_id:
+                        return mr
+        return None
+
+
+class AlectraPowerSensor(CoordinatorEntity[AlectraCoordinator], SensorEntity):
+    """Sensor showing average power (W) for the most recent interval."""
+
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "W"
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:flash"
+
+    def __init__(
+        self,
+        coordinator: AlectraCoordinator,
+        entry: ConfigEntry,
+        usage_point: UsagePoint,
+        meter_reading: MeterReading,
+        label: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._usage_point_id = usage_point.id
+        self._meter_reading_id = meter_reading.id
+        self._key = f"{usage_point.id}_{meter_reading.id}"
+        self._attr_unique_id = f"{entry.entry_id}_power_{self._key}"
+        name = f"{label} Average Power" if label else "Average Power"
+        self._attr_name = name.strip()
+        self._attr_device_info = _make_device_info(entry, usage_point)
+
+    @property
+    def native_value(self) -> float | None:
+        reading = self.coordinator.get_latest_reading(self._key)
+        if not reading or reading.duration == 0:
+            return None
+        mr = self._find_meter_reading()
+        if not mr or not mr.reading_type:
+            return None
+        rt = mr.reading_type
+        energy_wh = reading.value * rt.multiplier
+        if rt.uom == UOM_WH:
+            hours = reading.duration / 3600.0
+            if hours > 0:
+                return round(energy_wh / hours, 1)
+        return None
+
+    @property
+    def extra_state_attributes(self) -> dict | None:
+        reading = self.coordinator.get_latest_reading(self._key)
+        if not reading:
+            return None
+        attrs = {
+            "interval_start": datetime.fromtimestamp(
+                reading.start, tz=timezone.utc
+            ).isoformat(),
+        }
+        if reading.tou is not None:
+            attrs["time_of_use"] = TOU_NAMES.get(reading.tou, f"TOU {reading.tou}")
+        return attrs
+
+    def _find_meter_reading(self) -> MeterReading | None:
+        if not self.coordinator.data:
+            return None
+        for up in self.coordinator.data:
+            if up.id == self._usage_point_id:
+                for mr in up.meter_readings:
+                    if mr.id == self._meter_reading_id:
+                        return mr
+        return None
+
+
+class AlectraIntervalCostSensor(
+    CoordinatorEntity[AlectraCoordinator], SensorEntity
+):
+    """Cost from the latest interval reading."""
+
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_state_class = SensorStateClass.TOTAL
+    _attr_native_unit_of_measurement = "CAD"
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:currency-usd"
+
+    def __init__(
+        self,
+        coordinator: AlectraCoordinator,
+        entry: ConfigEntry,
+        usage_point: UsagePoint,
+        meter_reading: MeterReading,
+        label: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._usage_point_id = usage_point.id
+        self._meter_reading_id = meter_reading.id
+        self._key = f"{usage_point.id}_{meter_reading.id}"
+        self._attr_unique_id = f"{entry.entry_id}_interval_cost_{self._key}"
+        name = f"{label} Interval Cost" if label else "Interval Cost"
+        self._attr_name = name.strip()
+        self._attr_device_info = _make_device_info(entry, usage_point)
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the latest interval's cost in dollars.
+
+        ESPI interval cost values are typically in hundred-thousandths
+        of the currency unit (10^-5), so 9800 = $0.098.
+        """
+        reading = self.coordinator.get_latest_reading(self._key)
+        if not reading or reading.cost is None:
+            return None
+        # Interval cost is in hundred-thousandths of a dollar (10^-5)
+        return round(reading.cost / 100000.0, 4)
+
+    @property
+    def extra_state_attributes(self) -> dict | None:
+        reading = self.coordinator.get_latest_reading(self._key)
+        if not reading:
+            return None
+        attrs = {
+            "interval_start": datetime.fromtimestamp(
+                reading.start, tz=timezone.utc
+            ).isoformat(),
+            "raw_cost": reading.cost,
+        }
+        if reading.tou is not None:
+            attrs["time_of_use"] = TOU_NAMES.get(reading.tou, f"TOU {reading.tou}")
+        return attrs
+
+
+# ---------------------------------------------------------------------------
+# Billing summary sensors (from UsageSummary data)
+# ---------------------------------------------------------------------------
+
+
 class AlectraBillingConsumptionSensor(
     CoordinatorEntity[AlectraCoordinator], SensorEntity
 ):
@@ -168,7 +421,6 @@ class AlectraBillingConsumptionSensor(
 
     @property
     def extra_state_attributes(self) -> dict | None:
-        """Return billing period details."""
         up = self._find_usage_point()
         if not up or not up.usage_summaries:
             return None
@@ -222,7 +474,6 @@ class AlectraBillingCostSensor(
 
     @property
     def native_value(self) -> float | None:
-        """Return the billing period cost in dollars."""
         up = self._find_usage_point()
         if not up or not up.usage_summaries:
             return None
@@ -232,7 +483,6 @@ class AlectraBillingCostSensor(
 
     @property
     def extra_state_attributes(self) -> dict | None:
-        """Return cost details."""
         up = self._find_usage_point()
         if not up or not up.usage_summaries:
             return None
@@ -292,7 +542,6 @@ class AlectraCurrentConsumptionSensor(
 
     @property
     def native_value(self) -> float | None:
-        """Return current billing period consumption in kWh."""
         up = self._find_usage_point()
         if not up or not up.usage_summaries:
             return None
@@ -338,7 +587,6 @@ class AlectraBillingLineItemSensor(
 
     @property
     def native_value(self) -> float | None:
-        """Return the line item amount in dollars."""
         up = self._find_usage_point()
         if not up or not up.usage_summaries:
             return None
@@ -357,140 +605,9 @@ class AlectraBillingLineItemSensor(
         return None
 
 
-class AlectraEnergySensor(CoordinatorEntity[AlectraCoordinator], SensorEntity):
-    """Sensor for electricity consumption in kWh from interval data."""
-
-    _attr_device_class = SensorDeviceClass.ENERGY
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
-    _attr_native_unit_of_measurement = "kWh"
-    _attr_has_entity_name = True
-    _attr_icon = "mdi:lightning-bolt"
-
-    def __init__(
-        self,
-        coordinator: AlectraCoordinator,
-        entry: ConfigEntry,
-        usage_point: UsagePoint,
-        meter_reading: MeterReading,
-    ) -> None:
-        super().__init__(coordinator)
-        self._usage_point = usage_point
-        self._meter_reading = meter_reading
-        self._key = f"{usage_point.id}_{meter_reading.id}"
-        self._attr_unique_id = f"{entry.entry_id}_energy_{self._key}"
-        self._attr_name = "Energy Consumption"
-        self._attr_device_info = _make_device_info(entry, usage_point)
-
-    @callback
-    def _handle_coordinator_update(self) -> None:
-        self.async_write_ha_state()
-
-    @property
-    def native_value(self) -> float | None:
-        return self.coordinator.get_cumulative_kwh(self._key)
-
-    @property
-    def extra_state_attributes(self) -> dict | None:
-        reading = self.coordinator.get_latest_reading(self._key)
-        if not reading:
-            return None
-        attrs = {
-            "last_interval_start": datetime.fromtimestamp(
-                reading.start, tz=timezone.utc
-            ).isoformat(),
-            "last_interval_duration_seconds": reading.duration,
-            "last_interval_raw_value": reading.value,
-        }
-        if reading.tou is not None:
-            tou_names = {1: "On-Peak", 2: "Mid-Peak", 3: "Off-Peak", 4: "Super Off-Peak"}
-            attrs["time_of_use"] = tou_names.get(reading.tou, f"TOU {reading.tou}")
-            attrs["tou_code"] = reading.tou
-        return attrs
-
-
-class AlectraPowerSensor(CoordinatorEntity[AlectraCoordinator], SensorEntity):
-    """Sensor showing average power (W) for the most recent interval."""
-
-    _attr_device_class = SensorDeviceClass.POWER
-    _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_native_unit_of_measurement = "W"
-    _attr_has_entity_name = True
-    _attr_icon = "mdi:flash"
-
-    def __init__(
-        self,
-        coordinator: AlectraCoordinator,
-        entry: ConfigEntry,
-        usage_point: UsagePoint,
-        meter_reading: MeterReading,
-    ) -> None:
-        super().__init__(coordinator)
-        self._usage_point = usage_point
-        self._meter_reading = meter_reading
-        self._key = f"{usage_point.id}_{meter_reading.id}"
-        self._attr_unique_id = f"{entry.entry_id}_power_{self._key}"
-        self._attr_name = "Average Power"
-        self._attr_device_info = _make_device_info(entry, usage_point)
-
-    @property
-    def native_value(self) -> float | None:
-        reading = self.coordinator.get_latest_reading(self._key)
-        if not reading or reading.duration == 0:
-            return None
-        rt = self._meter_reading.reading_type
-        if not rt:
-            return None
-        energy_wh = reading.value * rt.multiplier
-        if rt.uom == UOM_WH:
-            hours = reading.duration / 3600.0
-            if hours > 0:
-                return round(energy_wh / hours, 1)
-        return None
-
-
-class AlectraCostSensor(CoordinatorEntity[AlectraCoordinator], SensorEntity):
-    """Sensor for electricity cost from interval data."""
-
-    _attr_device_class = SensorDeviceClass.MONETARY
-    _attr_state_class = SensorStateClass.TOTAL
-    _attr_native_unit_of_measurement = "CAD"
-    _attr_has_entity_name = True
-    _attr_icon = "mdi:currency-usd"
-
-    def __init__(
-        self,
-        coordinator: AlectraCoordinator,
-        entry: ConfigEntry,
-        usage_point: UsagePoint,
-        meter_reading: MeterReading,
-    ) -> None:
-        super().__init__(coordinator)
-        self._usage_point = usage_point
-        self._meter_reading = meter_reading
-        self._key = f"{usage_point.id}_{meter_reading.id}"
-        self._attr_unique_id = f"{entry.entry_id}_cost_{self._key}"
-        self._attr_name = "Energy Cost"
-        self._attr_device_info = _make_device_info(entry, usage_point)
-
-    @property
-    def native_value(self) -> float | None:
-        if not self.coordinator.data:
-            return None
-        total_cost = 0
-        found = False
-        for up in self.coordinator.data:
-            for mr in up.meter_readings:
-                if f"{up.id}_{mr.id}" != self._key:
-                    continue
-                cost_multiplier = 1e-5
-                if mr.reading_type and mr.reading_type.currency is not None:
-                    cost_multiplier = mr.reading_type.multiplier
-                for block in mr.interval_blocks:
-                    for reading in block.readings:
-                        if reading.cost is not None:
-                            total_cost += reading.cost * cost_multiplier
-                            found = True
-        return round(total_cost, 2) if found else None
+# ---------------------------------------------------------------------------
+# Status sensor
+# ---------------------------------------------------------------------------
 
 
 class AlectraStatusSensor(CoordinatorEntity[AlectraCoordinator], SensorEntity):
