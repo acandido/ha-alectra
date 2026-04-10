@@ -136,6 +136,7 @@ def _insert_meter_stats(
         "statistic_id": energy_stat_id,
         "name": f"Alectra {up.title or 'Meter'} Hourly Energy".strip(),
         "unit_of_measurement": "kWh",
+        "unit_class": "energy",
         "mean_type": StatisticMeanType.NONE,
         "has_mean": False,
         "has_sum": True,
@@ -196,6 +197,8 @@ def _insert_meter_stats(
             "statistic_id": cost_stat_id,
             "name": f"Alectra {up.title or 'Meter'} Hourly Cost".strip(),
             "unit_of_measurement": "CAD",
+            # Currency has no unit converter in HA, so unit_class is None
+            "unit_class": None,
             "mean_type": StatisticMeanType.NONE,
             "has_mean": False,
             "has_sum": True,
