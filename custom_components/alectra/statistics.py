@@ -18,6 +18,7 @@ import logging
 
 from homeassistant.components.recorder.models import (
     StatisticData,
+    StatisticMeanType,
     StatisticMetaData,
 )
 from homeassistant.components.recorder.statistics import (
@@ -135,6 +136,7 @@ def _insert_meter_stats(
         "statistic_id": energy_stat_id,
         "name": f"Alectra {up.title or 'Meter'} Hourly Energy".strip(),
         "unit_of_measurement": "kWh",
+        "mean_type": StatisticMeanType.NONE,
         "has_mean": False,
         "has_sum": True,
     }
@@ -194,6 +196,7 @@ def _insert_meter_stats(
             "statistic_id": cost_stat_id,
             "name": f"Alectra {up.title or 'Meter'} Hourly Cost".strip(),
             "unit_of_measurement": "CAD",
+            "mean_type": StatisticMeanType.NONE,
             "has_mean": False,
             "has_sum": True,
         }

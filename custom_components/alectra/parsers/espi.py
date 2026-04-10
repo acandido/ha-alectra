@@ -64,7 +64,7 @@ class GreenButtonFeed:
         # from the UsagePoint's related links so the caller knows to fetch them
         for up in self._usage_points.values():
             if not up.meter_readings:
-                _LOGGER.info(
+                _LOGGER.debug(
                     "UsagePoint %s has no MeterReadings in feed, "
                     "checking related links",
                     up.id,
@@ -86,7 +86,7 @@ class GreenButtonFeed:
                 "{http://www.w3.org/2005/Atom}entry"
             )
 
-        _LOGGER.info("Found %d entries in feed", len(entries))
+        _LOGGER.debug("Found %d entries in feed", len(entries))
 
         for entry_elem in entries:
             entry = EspiEntry(entry_elem)
@@ -184,7 +184,7 @@ class GreenButtonFeed:
             # Store related links for later use (fetching sub-resources)
             up._related_links = entry.related_links
 
-            _LOGGER.info(
+            _LOGGER.debug(
                 "Parsed UsagePoint: %s (%s), related links: %s",
                 up.id, up.title, entry.related_links,
             )
@@ -280,7 +280,7 @@ class GreenButtonFeed:
             if us_elem is None:
                 continue
 
-            _LOGGER.info(
+            _LOGGER.debug(
                 "Found UsageSummary entry: %s, children: %s",
                 entry.self_link,
                 [child.tag for child in us_elem],
@@ -362,7 +362,7 @@ class GreenButtonFeed:
                 line_items=line_items,
             )
 
-            _LOGGER.info(
+            _LOGGER.debug(
                 "Parsed UsageSummary: bp_start=%s, "
                 "consumption: value=%s uom=%s pot=%s (%.3f kWh), "
                 "cost: value=%s pot=%s ($%.2f), "
@@ -377,7 +377,7 @@ class GreenButtonFeed:
             )
             for item in line_items:
                 if item.amount is not None:
-                    _LOGGER.info(
+                    _LOGGER.debug(
                         "  Line item: %s = $%.2f",
                         item.note, item.amount_dollars or 0,
                     )
@@ -386,7 +386,7 @@ class GreenButtonFeed:
             parent = self._find_parent_usage_point(entry.self_link or "")
             if parent:
                 parent.usage_summaries.append(summary)
-                _LOGGER.info(
+                _LOGGER.debug(
                     "Linked UsageSummary to UsagePoint %s", parent.id
                 )
 
