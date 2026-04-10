@@ -11,6 +11,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .api import AlectraApiClient, AlectraApiError
 from .const import DEFAULT_SCAN_INTERVAL, DOMAIN
 from .model import IntervalReading, UsagePoint
+from .statistics import async_insert_statistics
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -106,6 +107,14 @@ class AlectraCoordinator(DataUpdateCoordinator[list[UsagePoint]]):
             sum(len(up.meter_readings) for up in usage_points),
             sum(len(up.usage_summaries) for up in usage_points),
         )
+
+        # Inject hourly interval data into HA's long-term statistics so it
+        # appears in the Energy Dashboard with full hourly resolution.
+        try:
+            await async_insert_statistics(self.hass, usage_points)
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception("Failed to insert long-term statistics")
+
         return usage_points
 
     def _find_latest_reading(
