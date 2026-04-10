@@ -171,8 +171,13 @@ def _insert_meter_stats(
 
         if reading.cost is not None:
             has_cost = True
-            # ESPI interval cost uses 10^-5 convention
-            cost_dollars = reading.cost / 100000.0
+            # NOTE: Per ESPI spec, the `cost` field should be the total cost
+            # of the interval in 1/100000 of currency. In practice, Alectra
+            # publishes the per-kWh RATE here instead (e.g., 9800 → $0.098/kWh
+            # off-peak, 15700 → $0.157/kWh mid-peak, 20300 → $0.203/kWh on-peak).
+            # We multiply the rate by the interval's energy to get real cost.
+            rate_per_kwh = reading.cost / 100000.0
+            cost_dollars = rate_per_kwh * kwh
             cost_running_sum += cost_dollars
             cost_data.append(
                 StatisticData(

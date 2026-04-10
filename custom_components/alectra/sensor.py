@@ -357,14 +357,25 @@ class AlectraIntervalCostSensor(
     def native_value(self) -> float | None:
         """Return the latest interval's cost in dollars.
 
-        ESPI interval cost values are typically in hundred-thousandths
-        of the currency unit (10^-5), so 9800 = $0.098.
+        Alectra publishes a per-kWh RATE in the ESPI `cost` field
+        (e.g., 9800 = $0.098/kWh off-peak), not the total interval cost,
+        so we multiply by the interval's kWh to get the actual dollar
+        amount spent in that interval.
         """
         reading = self.coordinator.get_latest_reading(self._key)
         if not reading or reading.cost is None:
             return None
-        # Interval cost is in hundred-thousandths of a dollar (10^-5)
-        return round(reading.cost / 100000.0, 4)
+        mr = self._find_meter_reading()
+        if not mr or not mr.reading_type:
+            return None
+        rt = mr.reading_type
+        energy_raw = reading.value * rt.multiplier
+        if rt.uom == UOM_WH:
+            kwh = energy_raw / 1000.0
+        else:
+            kwh = energy_raw
+        rate_per_kwh = reading.cost / 100000.0
+        return round(rate_per_kwh * kwh, 4)
 
     @property
     def extra_state_attributes(self) -> dict | None:
@@ -377,9 +388,21 @@ class AlectraIntervalCostSensor(
             ).isoformat(),
             "raw_cost": reading.cost,
         }
+        if reading.cost is not None:
+            attrs["rate_per_kwh"] = round(reading.cost / 100000.0, 5)
         if reading.tou is not None:
             attrs["time_of_use"] = TOU_NAMES.get(reading.tou, f"TOU {reading.tou}")
         return attrs
+
+    def _find_meter_reading(self) -> MeterReading | None:
+        if not self.coordinator.data:
+            return None
+        for up in self.coordinator.data:
+            if up.id == self._usage_point_id:
+                for mr in up.meter_readings:
+                    if mr.id == self._meter_reading_id:
+                        return mr
+        return None
 
 
 # ---------------------------------------------------------------------------
