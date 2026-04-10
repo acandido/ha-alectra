@@ -22,6 +22,7 @@ from homeassistant.components.recorder.models import (
 )
 from homeassistant.components.recorder.statistics import (
     async_add_external_statistics,
+    get_instance,
 )
 from homeassistant.core import HomeAssistant
 
@@ -50,7 +51,31 @@ async def async_insert_statistics(
     hass: HomeAssistant,
     usage_points: list[UsagePoint],
 ) -> None:
-    """Insert all historical hourly interval data as external statistics."""
+    """Insert all historical hourly interval data as external statistics.
+
+    Clears existing external statistics for our statistic_ids first so
+    corrupted historical rows (e.g., from earlier parser bugs) are wiped,
+    then reinserts fresh data from the current CMD response.
+    """
+    # Collect all stat_ids we'll touch so we can clear them first
+    stat_ids: list[str] = []
+    for up in usage_points:
+        for mr in up.meter_readings:
+            if not mr.reading_type or mr.reading_type.interval_length != 3600:
+                continue
+            stat_ids.append(_stat_id("energy", up.id, mr.id))
+            stat_ids.append(_stat_id("cost", up.id, mr.id))
+
+    if stat_ids:
+        try:
+            get_instance(hass).async_clear_statistics(stat_ids)
+            _LOGGER.info(
+                "Cleared %d existing external statistic(s) for reinsertion",
+                len(stat_ids),
+            )
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception("Failed to clear existing statistics")
+
     for up in usage_points:
         for mr in up.meter_readings:
             rt = mr.reading_type
@@ -74,10 +99,16 @@ def _insert_meter_stats(
     if not rt:
         return
 
-    # Collect all readings across blocks, sorted by start time
+    # Collect all readings across blocks, sorted by start time.
+    # Only include per-reading duration == 3600 (1 hour). Some meter
+    # readings include a daily cumulative odometer row mixed in with
+    # the hourly data; those have duration=86400 and huge raw values
+    # (e.g., 192,693 kWh), which would corrupt the stats.
     all_readings = []
     for block in mr.interval_blocks:
-        all_readings.extend(block.readings)
+        for reading in block.readings:
+            if reading.duration == 3600:
+                all_readings.append(reading)
     all_readings.sort(key=lambda r: r.start)
 
     if not all_readings:
