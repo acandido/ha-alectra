@@ -99,17 +99,31 @@ def _insert_meter_stats(
     if not rt:
         return
 
-    # Collect all readings across blocks, sorted by start time.
+    # Collect all readings across blocks, deduped by start timestamp.
+    # The CMD batch response contains MANY duplicate IntervalBlocks
+    # (overlapping time ranges, repeated hourly readings), so we
+    # must dedupe to avoid multi-counting the same hour.
     # Only include per-reading duration == 3600 (1 hour). Some meter
     # readings include a daily cumulative odometer row mixed in with
     # the hourly data; those have duration=86400 and huge raw values
     # (e.g., 192,693 kWh), which would corrupt the stats.
-    all_readings = []
+    by_start: dict[int, object] = {}
+    total_seen = 0
     for block in mr.interval_blocks:
         for reading in block.readings:
-            if reading.duration == 3600:
-                all_readings.append(reading)
-    all_readings.sort(key=lambda r: r.start)
+            total_seen += 1
+            if reading.duration != 3600:
+                continue
+            # Keep the last occurrence for any given hour
+            by_start[reading.start] = reading
+    all_readings = [by_start[k] for k in sorted(by_start)]
+
+    _LOGGER.info(
+        "MeterReading %s: %d raw readings → %d unique hourly readings",
+        mr.id,
+        total_seen,
+        len(all_readings),
+    )
 
     if not all_readings:
         return
