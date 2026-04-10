@@ -58,6 +58,26 @@ async def async_insert_statistics(
     corrupted historical rows (e.g., from earlier parser bugs) are wiped,
     then reinserts fresh data from the current CMD response.
     """
+    _LOGGER.warning(
+        "[ALECTRA-STATS-V2] async_insert_statistics running with cost=rate*kwh fix"
+    )
+    # Emit a persistent notification so we can confirm this code path runs
+    # (logs are hard to inspect remotely). Safe to fire every refresh — HA
+    # will overwrite the same notification_id rather than stacking them.
+    try:
+        from homeassistant.components.persistent_notification import (
+            async_create as _pn_create,
+        )
+        _pn_create(
+            hass,
+            "Alectra statistics.py v2 ran at "
+            f"{datetime.now(tz=timezone.utc).isoformat()}",
+            title="Alectra Stats Fix Running",
+            notification_id="alectra_stats_v2_heartbeat",
+        )
+    except Exception:  # noqa: BLE001
+        _LOGGER.exception("Failed to emit heartbeat notification")
+
     # Collect all stat_ids we'll touch so we can clear them first
     stat_ids: list[str] = []
     for up in usage_points:
@@ -187,11 +207,13 @@ def _insert_meter_stats(
                 )
             )
 
-    _LOGGER.info(
-        "Inserting %d hourly energy statistics for %s (total %.2f kWh)",
+    _LOGGER.warning(
+        "[ALECTRA-STATS-V2] Inserting %d hourly energy statistics for %s "
+        "(total %.2f kWh); first cost sample: %s",
         len(energy_data),
         energy_stat_id,
         energy_running_sum,
+        cost_data[0] if cost_data else "none",
     )
     async_add_external_statistics(hass, energy_meta, energy_data)
 
