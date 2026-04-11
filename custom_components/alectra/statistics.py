@@ -61,22 +61,20 @@ async def async_insert_statistics(
     _LOGGER.warning(
         "[ALECTRA-STATS-V2] async_insert_statistics running with cost=rate*kwh fix"
     )
-    # Emit a persistent notification so we can confirm this code path runs
-    # (logs are hard to inspect remotely). Safe to fire every refresh — HA
-    # will overwrite the same notification_id rather than stacking them.
+    # Diagnostic heartbeat — write to a synthetic state so we can verify
+    # this code path runs from outside the integration. HACS/HA pycache
+    # bugs have masked deploys before, so this gives an unambiguous signal.
     try:
-        from homeassistant.components.persistent_notification import (
-            async_create as _pn_create,
-        )
-        _pn_create(
-            hass,
-            "Alectra statistics.py v2 ran at "
-            f"{datetime.now(tz=timezone.utc).isoformat()}",
-            title="Alectra Stats Fix Running",
-            notification_id="alectra_stats_v2_heartbeat",
+        hass.states.async_set(
+            "alectra.stats_heartbeat",
+            datetime.now(tz=timezone.utc).isoformat(),
+            {
+                "version": "v2-cost-rate-fix",
+                "usage_points": len(usage_points),
+            },
         )
     except Exception:  # noqa: BLE001
-        _LOGGER.exception("Failed to emit heartbeat notification")
+        _LOGGER.exception("Failed to write heartbeat state")
 
     # Collect all stat_ids we'll touch so we can clear them first
     stat_ids: list[str] = []

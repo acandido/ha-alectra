@@ -7,5 +7,5 @@
   "documentation": "https://github.com/acandido/ha-alectra",
   "iot_class": "cloud_polling",
   "requirements": ["defusedxml==0.7.1"],
-  "version": "0.1.2"
+  "version": "0.1.3"
 }
