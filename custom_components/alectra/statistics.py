@@ -234,21 +234,46 @@ def _insert_meter_stats(
 
     if has_cost and cost_data:
         cost_stat_id = _stat_id("cost", up.id, mr.id)
+        # Currency statistics have no unit converter in HA, so unit_class
+        # is omitted entirely. Pre-2026.11 builds also accept it as None,
+        # but newer recorder versions reject the key when there's no
+        # matching converter, silently dropping the entire batch.
         cost_meta: StatisticMetaData = {
             "source": DOMAIN,
             "statistic_id": cost_stat_id,
             "name": f"Alectra {up.title or 'Meter'} Hourly Cost".strip(),
             "unit_of_measurement": "CAD",
-            # Currency has no unit converter in HA, so unit_class is None
-            "unit_class": None,
             "mean_type": StatisticMeanType.NONE,
             "has_mean": False,
             "has_sum": True,
         }
-        _LOGGER.info(
-            "Inserting %d hourly cost statistics for %s (total $%.2f)",
+        _LOGGER.warning(
+            "[ALECTRA-STATS-V2] Inserting %d hourly cost statistics for %s "
+            "(total $%.2f); first sample: %s",
             len(cost_data),
             cost_stat_id,
             cost_running_sum,
+            cost_data[0],
         )
-        async_add_external_statistics(hass, cost_meta, cost_data)
+        try:
+            async_add_external_statistics(hass, cost_meta, cost_data)
+            hass.states.async_set(
+                "alectra.cost_insert_status",
+                "ok",
+                {
+                    "stat_id": cost_stat_id,
+                    "rows": len(cost_data),
+                    "total": round(cost_running_sum, 2),
+                },
+            )
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.exception("Cost statistics insertion failed")
+            hass.states.async_set(
+                "alectra.cost_insert_status",
+                "error",
+                {
+                    "stat_id": cost_stat_id,
+                    "error": str(exc),
+                    "type": type(exc).__name__,
+                },
+            )
