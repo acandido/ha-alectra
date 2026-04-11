@@ -213,6 +213,23 @@ def _insert_meter_stats(
         energy_running_sum,
         cost_data[0] if cost_data else "none",
     )
+    # Also expose the first cost sample via state machine for remote inspection
+    try:
+        sample = cost_data[0] if cost_data else None
+        if sample is not None:
+            hass.states.async_set(
+                "alectra.first_cost_sample",
+                str(sample.get("state")),
+                {
+                    "start": str(sample.get("start")),
+                    "sum": str(sample.get("sum")),
+                    "first_kwh": round(all_readings[0].value * rt.multiplier / 1000.0, 4),
+                    "first_raw_cost": all_readings[0].cost,
+                    "stat_id": energy_stat_id,
+                },
+            )
+    except Exception:  # noqa: BLE001
+        _LOGGER.exception("Failed to write first_cost_sample state")
     async_add_external_statistics(hass, energy_meta, energy_data)
 
     if has_cost and cost_data:
