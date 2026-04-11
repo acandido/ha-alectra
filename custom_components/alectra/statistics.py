@@ -58,24 +58,6 @@ async def async_insert_statistics(
     corrupted historical rows (e.g., from earlier parser bugs) are wiped,
     then reinserts fresh data from the current CMD response.
     """
-    _LOGGER.warning(
-        "[ALECTRA-STATS-V2] async_insert_statistics running with cost=rate*kwh fix"
-    )
-    # Diagnostic heartbeat — write to a synthetic state so we can verify
-    # this code path runs from outside the integration. HACS/HA pycache
-    # bugs have masked deploys before, so this gives an unambiguous signal.
-    try:
-        hass.states.async_set(
-            "alectra.stats_heartbeat",
-            datetime.now(tz=timezone.utc).isoformat(),
-            {
-                "version": "v2-cost-rate-fix",
-                "usage_points": len(usage_points),
-            },
-        )
-    except Exception:  # noqa: BLE001
-        _LOGGER.exception("Failed to write heartbeat state")
-
     # Collect all stat_ids we'll touch so we can clear them first
     stat_ids: list[str] = []
     for up in usage_points:
@@ -205,39 +187,20 @@ def _insert_meter_stats(
                 )
             )
 
-    _LOGGER.warning(
-        "[ALECTRA-STATS-V2] Inserting %d hourly energy statistics for %s "
-        "(total %.2f kWh); first cost sample: %s",
+    _LOGGER.info(
+        "Inserting %d hourly energy statistics for %s (total %.2f kWh)",
         len(energy_data),
         energy_stat_id,
         energy_running_sum,
-        cost_data[0] if cost_data else "none",
     )
-    # Also expose the first cost sample via state machine for remote inspection
-    try:
-        sample = cost_data[0] if cost_data else None
-        if sample is not None:
-            hass.states.async_set(
-                "alectra.first_cost_sample",
-                str(sample.get("state")),
-                {
-                    "start": str(sample.get("start")),
-                    "sum": str(sample.get("sum")),
-                    "first_kwh": round(all_readings[0].value * rt.multiplier / 1000.0, 4),
-                    "first_raw_cost": all_readings[0].cost,
-                    "stat_id": energy_stat_id,
-                },
-            )
-    except Exception:  # noqa: BLE001
-        _LOGGER.exception("Failed to write first_cost_sample state")
     async_add_external_statistics(hass, energy_meta, energy_data)
 
     if has_cost and cost_data:
         cost_stat_id = _stat_id("cost", up.id, mr.id)
         # Currency statistics have no unit converter in HA, so unit_class
-        # is omitted entirely. Pre-2026.11 builds also accept it as None,
-        # but newer recorder versions reject the key when there's no
-        # matching converter, silently dropping the entire batch.
+        # is omitted entirely. Newer recorder versions silently drop the
+        # entire batch if unit_class is set to None or to a string that
+        # doesn't map to a registered converter.
         cost_meta: StatisticMetaData = {
             "source": DOMAIN,
             "statistic_id": cost_stat_id,
@@ -247,33 +210,10 @@ def _insert_meter_stats(
             "has_mean": False,
             "has_sum": True,
         }
-        _LOGGER.warning(
-            "[ALECTRA-STATS-V2] Inserting %d hourly cost statistics for %s "
-            "(total $%.2f); first sample: %s",
+        _LOGGER.info(
+            "Inserting %d hourly cost statistics for %s (total $%.2f)",
             len(cost_data),
             cost_stat_id,
             cost_running_sum,
-            cost_data[0],
         )
-        try:
-            async_add_external_statistics(hass, cost_meta, cost_data)
-            hass.states.async_set(
-                "alectra.cost_insert_status",
-                "ok",
-                {
-                    "stat_id": cost_stat_id,
-                    "rows": len(cost_data),
-                    "total": round(cost_running_sum, 2),
-                },
-            )
-        except Exception as exc:  # noqa: BLE001
-            _LOGGER.exception("Cost statistics insertion failed")
-            hass.states.async_set(
-                "alectra.cost_insert_status",
-                "error",
-                {
-                    "stat_id": cost_stat_id,
-                    "error": str(exc),
-                    "type": type(exc).__name__,
-                },
-            )
+        async_add_external_statistics(hass, cost_meta, cost_data)
